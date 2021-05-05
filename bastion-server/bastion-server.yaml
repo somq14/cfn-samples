@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  provision an ec2 instance as a bastion server.
+  the ec2 instance can be connected with session manager.
+
+Parameters:
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: a public subnet where ec2 instance wll be located
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+
+Resources:
+  ################################################################################
+  # パブリックなIPを持つEC2インスタンスを作成
+  ################################################################################
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnetId
+      IamInstanceProfile: !Ref InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-instance
+
+  Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref Instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-eip
+
+  ################################################################################
+  # 以降、セッションマネージャでEC2インスタンスに接続する権限を与える
+  ################################################################################
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore

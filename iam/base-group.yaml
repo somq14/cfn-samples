@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  IpWhiteList:
+    Type: CommaDelimitedList
+    Description: ex. "10.0.0.0/16,10.0.1.0/16"
+
+Resources:
+  BaseGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: base-group
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+        - !Ref IpRestrictionPolicy
+        - !Ref AllowManageOwnPasswordPolicy
+        - !Ref AllowManageOwnMfaPolicy
+        - !Ref DenyUnlessMfaPolicy
+
+  IpRestrictionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ip-restriction-policy
+      PolicyDocument:
+        # ref. https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/reference_policies_examples_aws_deny-ip.html
+        Version: "2012-10-17"
+        Statement:
+          Effect: Deny
+          Action: "*"
+          Resource: "*"
+          Condition:
+            NotIpAddress:
+              aws:SourceIp: !Ref IpWhiteList
+            Bool:
+              aws:ViaAwsService: "false"
+
+  AllowManageOwnPasswordPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: allow-manage-own-password-policy
+      PolicyDocument:
+        # ref. https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/id_credentials_passwords_enable-user-change.html
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Action:
+            - iam:ChangePassword
+            - iam:GetAccountPasswordPolicy
+          Resource:
+            - !Sub arn:aws:iam::${AWS::AccountId}:user/${!aws:username}
+
+  AllowManageOwnMfaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: allow-manage-own-mfa-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:ListMFADevices
+              - iam:EnableMFADevice
+              - iam:DeactivateMFADevice
+              - iam:ResyncMFADevice
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:user/${!aws:username}
+          - Effect: Allow
+            Action:
+              - iam:ListVirtualMFADevice
+              - iam:CreateVirtualMFADevice
+              - iam:DeleteVirtualMFADevice
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:mfa/${!aws:username}
+
+  DenyUnlessMfaPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: deny-unless-mfa-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Deny
+          NotAction:
+            # 初回ログイン後のパスワード変更のため
+            - iam:ChangePassword
+            - iam:GetAccountPasswordPolicy
+            # 初回ログイン後のMFA設定のため
+            - iam:ListMFADevices
+            - iam:CreateVirtualMFADevice
+            - iam:EnableMFADevice
+          NotResource:
+            - !Sub arn:aws:iam::${AWS::AccountId}:user/${!aws:username}
+            - !Sub arn:aws:iam::${AWS::AccountId}:mfa/${!aws:username}
+          Condition:
+            # aws:MultiFactorAuthPresent は APIキーによるアクセスのときは存在しない
+            # BoolIfExists は 値が存在しないとき true と評価される
+            BoolIfExists:
+              aws:MultiFactorAuthPresent: "false"
